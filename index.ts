@@ -21,11 +21,34 @@ function visit(n: ts.Node, tc: ts.TypeChecker) {
 }
 
 function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
+  const jsdocTag = {};
+  if (t.parent) {
+    ts.getJSDocTags(t.parent).forEach(tag => {
+      jsdocTag[tag.tagName.text] = tag.comment;
+    });
+  }
   switch (t.kind) {
     case ts.SyntaxKind.StringKeyword:
-      return { type: "string" };
+      return {
+        type: "string",
+        ...jsdocTag
+      };
     case ts.SyntaxKind.NumberKeyword:
-      return { type: "number" };
+      return {
+        type: "number",
+        ...jsdocTag
+      };
+    case ts.SyntaxKind.BooleanKeyword:
+      return {
+        type: "boolean",
+        ...jsdocTag
+      };
+    case ts.SyntaxKind.NullKeyword:
+    case ts.SyntaxKind.UndefinedKeyword:
+      return {
+        type: "null",
+        ...jsdocTag
+      };
   }
   if (ts.isTypeLiteralNode(t)) {
     const signatures = t.members.filter(ts.isPropertySignature);
@@ -46,13 +69,15 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
     return {
       type: "object",
       properties,
-      required
+      required,
+      ...jsdocTag
     };
   }
   if (ts.isArrayTypeNode(t)) {
     return {
       type: "array",
-      items: getTypeDefinition(t.elementType)
+      items: getTypeDefinition(t.elementType),
+      ...jsdocTag
     };
   }
   if (ts.isTypeReferenceNode(t)) {
@@ -60,22 +85,35 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
       case "Array":
         return {
           type: "array",
-          items: getTypeDefinition(t.typeArguments[0])
+          items: getTypeDefinition(t.typeArguments[0]),
+          ...jsdocTag
         };
       case "Partial":
         const partialDef = getTypeDefinition(t.typeArguments[0]);
         delete partialDef.required;
-        return partialDef;
+        return {
+          ...partialDef,
+          ...jsdocTag
+        };
       case "Required":
         const requiredDef = getTypeDefinition(t.typeArguments[0]);
         requiredDef.required = Object.keys(requiredDef.properties);
-        return requiredDef;
+        return {
+          ...requiredDef,
+          ...jsdocTag
+        };
       case "Readonly":
-        return getTypeDefinition(t.typeArguments[0]);
+        return {
+          ...getTypeDefinition(t.typeArguments[0]),
+          ...jsdocTag
+        };
       case "Pick":
         const pickDef = getTypeDefinition(t.typeArguments[0]);
         const pickKeys = getTypeDefinition(t.typeArguments[1]);
-        return pickProperties(pickDef, pickKeys.enum as string[]);
+        return {
+          ...pickProperties(pickDef, pickKeys.enum as string[]),
+          ...jsdocTag
+        };
       case "Record":
         const recordKeys = getTypeDefinition(t.typeArguments[0])
           .enum as string[];
@@ -89,27 +127,58 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
         return {
           type: "object",
           properties,
-          required: recordKeys
+          required: recordKeys,
+          ...jsdocTag
         };
       case "Exclude":
-        return getTypeDefinition(t.typeArguments[0]);
+        return {
+          ...getTypeDefinition(t.typeArguments[0]),
+          ...jsdocTag
+        };
       case "Extract":
-        return getTypeDefinition(t.typeArguments[1]);
+        return {
+          ...getTypeDefinition(t.typeArguments[1]),
+          ...jsdocTag
+        };
       case "Omit":
         const omitDef = getTypeDefinition(t.typeArguments[0]);
         const omitKeys = getTypeDefinition(t.typeArguments[1]);
-        return dropProperties(omitDef, omitKeys.enum as string[]);
+        return {
+          ...dropProperties(omitDef, omitKeys.enum as string[]),
+          ...jsdocTag
+        };
+      case "Date":
+        return {
+          type: "string",
+          format: "time",
+          ...jsdocTag
+        };
+      case "RegExp":
+        return {
+          type: "string",
+          format: "regex",
+          ...jsdocTag
+        };
+      default:
+        if (t.typeArguments == null) {
+          return {
+            $ref: `#/definitions/${t.typeName.getText()}`,
+            ...jsdocTag
+          };
+        }
     }
   }
   if (ts.isLiteralTypeNode(t)) {
     if (ts.isStringLiteral(t.literal)) {
       return {
-        enum: [t.literal.text]
+        enum: [t.literal.text],
+        ...jsdocTag
       };
     }
     if (ts.isNumericLiteral(t.literal)) {
       return {
-        enum: [+t.literal.text]
+        enum: [+t.literal.text],
+        ...jsdocTag
       };
     }
   }
@@ -119,23 +188,27 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
       const strings = literals.filter(ts.isStringLiteral);
       if (literals.length === strings.length) {
         return {
-          enum: strings.map(s => s.text)
+          enum: strings.map(s => s.text),
+          ...jsdocTag
         };
       }
       const numbers = literals.filter(ts.isNumericLiteral);
       if (literals.length === numbers.length) {
         return {
-          enum: numbers.map(n => +n.text)
+          enum: numbers.map(n => +n.text),
+          ...jsdocTag
         };
       }
     }
     return {
-      oneOf: t.types.map(getTypeDefinition)
+      oneOf: t.types.map(getTypeDefinition),
+      ...jsdocTag
     };
   }
   if (ts.isIntersectionTypeNode(t)) {
     return {
-      allOf: t.types.map(getTypeDefinition)
+      allOf: t.types.map(getTypeDefinition),
+      ...jsdocTag
     };
   }
   if (ts.isTypeOperatorNode(t)) {
@@ -143,13 +216,68 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
       case ts.SyntaxKind.KeyOfKeyword:
         const arg = getTypeDefinition(t.type);
         return {
-          enum: Object.keys(arg.properties)
+          enum: Object.keys(arg.properties),
+          ...jsdocTag
         };
+    }
+  }
+  if (ts.isConditionalTypeNode(t)) {
+    const resolvedType = typeChecker.getTypeFromTypeNode(t);
+    const trueType = typeChecker.getTypeFromTypeNode(t.trueType);
+    const falseType = typeChecker.getTypeFromTypeNode(t.falseType);
+    if (isSameType(resolvedType, trueType)) {
+      console.log(true);
+    } else {
+      console.log(false);
     }
   }
 }
 
 visit(program.getSourceFile(testfile), typeChecker);
+
+function isSameType(a: ts.Type, b: ts.Type): boolean {
+  if (a.flags !== b.flags) {
+    return false;
+  }
+  if (a.isLiteral() && b.isLiteral()) {
+    return a.value === b.value;
+  }
+  if (a.isUnionOrIntersection() && b.isUnionOrIntersection()) {
+    if (a.types.length !== b.types.length) {
+      return false;
+    }
+    for (let i = 0; i < a.types.length; i++) {
+      if (!isSameType(a.types[i], b.types[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return isSameSymbol(a.symbol, b.symbol);
+}
+
+function isSameSymbol(a: ts.Symbol, b: ts.Symbol): boolean {
+  if (a == null || b == null) {
+    return false;
+  }
+  if (a.flags !== b.flags) {
+    return false;
+  }
+  if (a.members == null && b.members == null) {
+    return a.name == b.name;
+  }
+  const it = a.members.keys();
+  while (true) {
+    const { value, done } = it.next();
+    if (done) {
+      break;
+    }
+    if (!isSameSymbol(a.members.get(value), b.members.get(value))) {
+      return false;
+    }
+  }
+  return true;
+}
 
 function pickProperties(def: JSONSchema7, keys: string[]): JSONSchema7 {
   if (def.type === "object") {
