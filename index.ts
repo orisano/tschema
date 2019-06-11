@@ -264,7 +264,16 @@ function isSameSymbol(a: ts.Symbol, b: ts.Symbol): boolean {
     return false;
   }
   if (a.members == null && b.members == null) {
-    return a.name == b.name;
+    const x = typeChecker.typeToString(
+      typeChecker.getTypeOfSymbolAtLocation(a, a.valueDeclaration!)
+    );
+    const y = typeChecker.typeToString(
+      typeChecker.getTypeOfSymbolAtLocation(b, b.valueDeclaration!)
+    );
+    return x === y;
+  }
+  if (a.members.size !== b.members.size) {
+    return false;
   }
   const it = a.members.keys();
   while (true) {
