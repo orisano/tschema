@@ -225,6 +225,9 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
     const resolvedType = typeChecker.getTypeFromTypeNode(t);
     const trueType = typeChecker.getTypeFromTypeNode(t.trueType);
     const falseType = typeChecker.getTypeFromTypeNode(t.falseType);
+    if (isSameType(trueType, falseType)) {
+      throw new Error(`bad conditional type, trueType equals falseType`); // TODO: add more information
+    }
     if (isSameType(resolvedType, trueType)) {
       console.log(true);
     } else {
@@ -239,53 +242,7 @@ function isSameType(a: ts.Type, b: ts.Type): boolean {
   if (a.flags !== b.flags) {
     return false;
   }
-  if (a.isLiteral() && b.isLiteral()) {
-    return a.value === b.value;
-  }
-  if (a.isUnionOrIntersection() && b.isUnionOrIntersection()) {
-    if (a.types.length !== b.types.length) {
-      return false;
-    }
-    for (let i = 0; i < a.types.length; i++) {
-      if (!isSameType(a.types[i], b.types[i])) {
-        return false;
-      }
-    }
-    return true;
-  }
-  return isSameSymbol(a.symbol, b.symbol);
-}
-
-function isSameSymbol(a: ts.Symbol, b: ts.Symbol): boolean {
-  if (a == null || b == null) {
-    return false;
-  }
-  if (a.flags !== b.flags) {
-    return false;
-  }
-  if (a.members == null && b.members == null) {
-    const x = typeChecker.typeToString(
-      typeChecker.getTypeOfSymbolAtLocation(a, a.valueDeclaration!)
-    );
-    const y = typeChecker.typeToString(
-      typeChecker.getTypeOfSymbolAtLocation(b, b.valueDeclaration!)
-    );
-    return x === y;
-  }
-  if (a.members.size !== b.members.size) {
-    return false;
-  }
-  const it = a.members.keys();
-  while (true) {
-    const { value, done } = it.next();
-    if (done) {
-      break;
-    }
-    if (!isSameSymbol(a.members.get(value), b.members.get(value))) {
-      return false;
-    }
-  }
-  return true;
+  return typeChecker.typeToString(a) === typeChecker.typeToString(b);
 }
 
 function pickProperties(def: JSONSchema7, keys: string[]): JSONSchema7 {
