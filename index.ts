@@ -12,12 +12,31 @@ const program = ts.createProgram({
 
 const typeChecker = program.getTypeChecker();
 
-function visit(n: ts.Node, tc: ts.TypeChecker) {
+const resolved: { [key: string]: JSONSchema7 } = {};
+const decls: { [key: string]: ts.TypeNode } = {};
+const metaTypes: { [key: string]: ts.Node } = {};
+
+function scan(n: ts.Node) {
   if (ts.isTypeAliasDeclaration(n)) {
-    console.log(JSON.stringify(getTypeDefinition(n.type), null, "  "));
+    if (n.typeParameters) {
+      metaTypes[n.name.text] = n;
+    } else {
+      decls[n.name.text] = n.type;
+    }
   } else {
-    n.forEachChild(node => visit(node, tc));
+    n.forEachChild(node => scan(node));
   }
+}
+
+function resolve(name: string): JSONSchema7 {
+  if (resolved[name]) {
+    return resolved[name];
+  }
+  if (decls[name]) {
+    resolved[name] = getTypeDefinition(decls[name]);
+    return resolved[name];
+  }
+  throw new Error(`"${name}" not found`);
 }
 
 function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
@@ -162,9 +181,10 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
       default:
         if (t.typeArguments == null) {
           return {
-            $ref: `#/definitions/${t.typeName.getText()}`,
+            ...resolve(t.typeName.getText()),
             ...jsdocTag
           };
+        } else {
         }
     }
   }
@@ -229,14 +249,20 @@ function getTypeDefinition(t: ts.TypeNode): JSONSchema7 {
       throw new Error(`bad conditional type, trueType equals falseType`); // TODO: add more information
     }
     if (isSameType(resolvedType, trueType)) {
-      console.log(true);
+      return {
+        ...getTypeDefinition(t.trueType),
+        ...jsdocTag
+      };
     } else {
-      console.log(false);
+      return {
+        ...getTypeDefinition(t.falseType),
+        ...jsdocTag
+      };
     }
   }
+  console.log(t);
+  throw new Error("unsupported node");
 }
-
-visit(program.getSourceFile(testfile), typeChecker);
 
 function isSameType(a: ts.Type, b: ts.Type): boolean {
   if (a.flags !== b.flags) {
@@ -306,3 +332,10 @@ function dropProperties(def: JSONSchema7, keys: string[]): JSONSchema7 {
     };
   }
 }
+
+const rootNode = program.getSourceFile(testfile);
+scan(rootNode);
+Object.keys(decls).forEach(k => {
+  console.log(k);
+  console.log(JSON.stringify(resolve(k), null, 2));
+});

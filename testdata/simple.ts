@@ -9,6 +9,7 @@ type Foo = {
   f: "A" | "B";
   g: Omit<{ a: string } & { b: number }, "a">;
   h: Bar;
+  i: Array<Bar>;
 };
 
 /**
@@ -22,4 +23,5 @@ type Bar = {
   y: number;
 };
 
-type FooBar = "string" extends number ? { a: string } : { a: number };
+type FooBar<T> = T extends string ? { a: string } : { a: number };
+// type Baz = FooBar<string>;
