@@ -2,4 +2,4 @@
 Work In Progress
 
 ## Author
-Nao YONASHIRO(@orisano)
+Nao Yonashiro (@orisano)
